@@ -28,11 +28,13 @@ function R = roll_rl_flightdata(csvfile, matfile, spec)
 %     K and wz hardly change because a << the loop bandwidth).
 %
 %   STEP 5  Checks: phase/gain margin, and a time simulation of the whole
-%     flight (needs canard_roll_envelfope.m on the path): roll rate with the
+%     flight (needs canard_roll_envelope.m on the path): roll rate with the
 %     canards locked vs controlled, against the pitch natural frequency.
 %
-%   Files written: roll_gain_schedule_flight.csv (per time step) and
-%   roll_gain_table_mach.csv (Mach -> Kp q/Ixx, Ki q/Ixx for the flight computer).
+%   Files written: roll_gain_schedule_flight.csv (per time step),
+%   roll_gain_table_mach.csv (Mach -> Kp q/Ixx, Ki q/Ixx for the flight computer)
+%   and roll_gain_table.mat (struct roll_gain_table: the Mach table, the design
+%   constants and the per-time-step schedule; R.table is the same struct).
 %
 %   spec fields (defaults)
 %     wz 6 [rad/s] PI zero, or 'auto' (largest K*wz that still reaches zeta)
@@ -147,6 +149,25 @@ fid = fopen('roll_gain_table_mach.csv', 'w');
 fprintf(fid, 'mach,dCN_ddelta_per_rad,Kp_times_qbar_over_Ixx,Ki_times_qbar_over_Ixx\n');
 fprintf(fid, '%.2f,%.5f,%.6g,%.6g\n', [Mt, CNt, Kt./(G*CNt), wzt*Kt./(G*CNt)].');
 fclose(fid);
+% the same table as a struct in roll_gain_table.mat (variable roll_gain_table)
+roll_gain_table = struct( ...
+    'mach',             Mt, ...                         % [-]      table breakpoints
+    'dCN_ddelta',       CNt, ...                        % [1/rad]  canard force slope at delta_ref
+    'Kp_qbar_over_Ixx', Kt./(G*CNt), ...                % Kp = this * Ixx / qbar   [s]
+    'Ki_qbar_over_Ixx', wzt*Kt./(G*CNt), ...            % Ki = this * Ixx / qbar   [-]
+    'K', Kt, 'wz', wzt, 'zeta', spec.zeta, ...          % loop gain [1/s], PI zero [rad/s], damping target
+    'G', G, 'delta_ref_deg', spec.delta_ref, ...        % canard geometry factor [m^3]
+    'tau_s', tau, 'Td', Td, 'f_loop', spec.f_loop, ...  % assumed servo time constant, loop delay [s]
+    'qbar_min', spec.qbar_min, 'dmax_deg', spec.dmax, ...
+    'usage', 'Kp = interp1(mach, Kp_qbar_over_Ixx, M) * Ixx / qbar;  Ki = wz * Kp  (SI units, angles in rad)', ...
+    'schedule', struct('t', t(k), 'h', h(k), 'mach', Ma(k), 'qbar', q(k), 'Ixx', Ixx(k), ...
+                       'a', a(k), 'b', b(k), 'dL', dL(k), 'Kp', Kp, 'Ki', Ki), ...   % along this flight
+    'source_csv', csvfile, 'source_mat', matfile, 'created', datestr(now, 'yyyy-mm-dd HH:MM'));
+if exist('OCTAVE_VERSION', 'builtin')
+    save('-v7', 'roll_gain_table.mat', 'roll_gain_table');
+else
+    save('roll_gain_table.mat', 'roll_gain_table', '-v7');
+end
 
 %% ---- report ------------------------------------------------------------
 if ~spec.quiet
@@ -184,13 +205,13 @@ if ~isempty(sim)
     fprintf('  root-locus PI  : peak |p| %.3f rad/s, max |p|/wn %.3f, max |delta| %.2f deg of %.0f\n', ...
             sim.pk(2), sim.ratio(2), sim.dmax_used, spec.dmax);
 end
-fprintf('  wrote roll_gain_schedule_flight.csv and roll_gain_table_mach.csv\n');
+fprintf('  wrote roll_gain_schedule_flight.csv, roll_gain_table_mach.csv and roll_gain_table.mat\n');
 end
 
 R = struct('t', t, 'h', h, 'M', Ma, 'qbar', q, 'Ixx', Ixx, 'a', a, 'b', b, 'dL', dL, 'pss', pss, 'wn', wn, ...
            'dtrim', dtrim, 'G', G, 'reff', reff, 'on', on, 'idx', k, 'K', K, 'wz', wz, 'Kp', Kp, 'Ki', Ki, ...
            'pm', pm, 'gm', gm, 'wc', wc, 'pm_true', pmT, 'gm_true', gmT, 'iq', iq, 'locus_k', kv, 'locus', rloc, 'design_poles', pdes, ...
-           'k_unstable', kcr, 'sim', sim, 'spec', spec);
+           'k_unstable', kcr, 'sim', sim, 'spec', spec, 'table', roll_gain_table);
 
 if ~spec.plot, return; end
 %% ---- figures -----------------------------------------------------------
